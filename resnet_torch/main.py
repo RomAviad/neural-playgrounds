@@ -25,13 +25,14 @@ def get_cifar10_loader(root, train, download, transform, batch_size=4):
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=2)
 
 
-def train_resnet(train_loader, num_epochs=2):
+def train_resnet(train_loader, num_epochs=2, num_classes=10):
     """
-    :param train_loader:
+    :param train_loader: :type DataLoader
     :param num_epochs: number of epochs on the training set. default is 2 because training on my laptop takes forever
-    :return:
+    :param num_classes: number of classes on the final layer
+    :return: a trained ResNet34 module
     """
-    net = ResNet34(num_classes=10)
+    net = ResNet34(num_classes=num_classes)
     criterion = nn.CrossEntropyLoss()
     optimizer = SGD(net.parameters(), lr=0.001, momentum=0.9)
     for epoch in range(num_epochs):
