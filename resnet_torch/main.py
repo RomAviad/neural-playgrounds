@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from torchvision.datasets.cifar import CIFAR10
 
-from resnet_torch.resnet_torch import ResNet34
+from resnet_torch.resnet import ResNet34
 
 
 def imshow(img):
@@ -62,22 +62,22 @@ def train_resnet(train_loader, num_epochs=2):
 
 
 if __name__ == '__main__':
-
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
 
+    # Download the train&test sets(if needed), and return corresponding DataLoader objects
     cifar_train_loader = get_cifar10_loader("./data", train=True, download=True, transform=transform)
     test_loader = get_cifar10_loader("./data", train=False, download=True, transform=transform)
 
-    cifar_classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-    net = train_resnet(cifar_train_loader, num_epochs=2)
+    # net = train_resnet(cifar_train_loader, num_epochs=2)
 
     dataiter = iter(test_loader)
     images, labels = next(dataiter)
 
     # print images
+    cifar_classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
     imshow(torchvision.utils.make_grid(images))
     print('GroundTruth: ', ' '.join('%5s' % cifar_classes[labels[j]] for j in range(4)))
-    torch.save(net, "./model.pickle")
+    # torch.save(net, "./model.pickle")

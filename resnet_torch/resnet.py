@@ -1,6 +1,6 @@
 from torch.nn import AvgPool2d, BatchNorm2d, Conv2d, Linear, MaxPool2d, Module, ReLU, Sequential
 
-from resnet_torch.res_block import ResBlock
+from .res_block import ResBlock
 
 
 class ResNet34(Module):
