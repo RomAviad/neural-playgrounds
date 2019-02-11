@@ -1,2 +1,2 @@
 # neural-playgrounds
-Various NN model implementations
+Various NN model implementations. 
