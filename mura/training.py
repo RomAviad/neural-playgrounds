@@ -34,7 +34,8 @@ class MuraBCELoss(Module):
     def forward(self, inputs, targets, phase, study_types):
         Wt1 = torch.Tensor([W1[study_type][phase] for study_type in study_types])
         Wt0 = torch.Tensor([W0[study_type][phase] for study_type in study_types])
-        loss = torch.neg(Wt1 * targets * inputs.log() + Wt0 * (1 - targets) * (1 - inputs).log())
+        inputs_t = inputs.view_as(targets)
+        loss = torch.neg(Wt1 * targets * inputs_t.log() + Wt0 * (1 - targets) * (1 - inputs_t).log())
         return loss
 
 
