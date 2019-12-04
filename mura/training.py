@@ -9,10 +9,10 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from torch.utils import model_zoo
 from mura.paper import MuraDenseNet
+import numpy as np
+from visdom import Visdom
 
-STUDY_TYPES = [
-    "XR_ELBOW", "XR_FINGER", "XR_FOREARM", "XR_HAND", "XR_HUMERUS", "XR_SHOULDER", "XR_WRIST"
-]
+IS_CUDA = False
 
 
 def get_pretrained_with_imagenet():
@@ -39,12 +39,14 @@ class MuraBCELoss(Module):
         return loss
 
 
-def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_sizes, num_epochs):
+def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_sizes, num_epochs, label_key="label"):
+    vis = Visdom()
+    line_windows = {"train_loss": None, "valid_loss": None, "train_acc": None, "valid_acc": None}
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-    costs = {x:[] for x in data_cat} # for storing costs per epoch
-    accs = {x:[] for x in data_cat} # for storing accuracies per epoch
+    costs = {x: [] for x in data_cat} # for storing costs per epoch
+    accs = {x: [] for x in data_cat} # for storing accuracies per epoch
     print("Train batches:", len(dataloaders["train"]))
     print("Valid batches:", len(dataloaders["valid"]), "\n")
     for epoch in range(num_epochs):
@@ -62,7 +64,7 @@ def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_siz
                 # get the inputs
                 print(i, end="\r")
                 inputs = data["images"]
-                labels = data["label"].type(torch.FloatTensor)
+                labels = data[label_key].type(torch.FloatTensor)
                 body_parts = data["type"]
                 # wrap them in Variable
                 inputs = Variable(inputs) #.cuda())
@@ -72,15 +74,17 @@ def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_siz
                 # forward
                 outputs = model(inputs)
                 # outputs = torch.mean(outputs)
-                loss = criterion(outputs, labels, phase, body_parts).mean()
+                # loss = criterion(outputs, labels, phase, body_parts).mean()
+                loss = criterion(outputs, labels).mean()
                 running_loss += loss.data.item()#[0]
                 # backward + optimize only if in training phase
                 if phase == "train":
                     loss.backward()
                     optimizer.step()
                 # statistics
-                preds = (outputs.data > 0.5).type(torch.FloatTensor) #cuda.FloatTensor)
-                running_corrects += torch.sum(preds == labels.view(-1, 1))
+                preds = (outputs.data > 0.7).type(torch.FloatTensor) #cuda.FloatTensor)
+                correct_preds = torch.Tensor([all(preds[i] == labels[i]) for i in range(len(preds))]) #BODY_PARTS
+                running_corrects += torch.sum(correct_preds)#preds == labels.view(-1, 1))
 
                 if i % 100 == 99:
                     print("Running Corrects: {} / {}; Running Loss {}".format(running_corrects, (i + 1) * len(labels),
@@ -89,6 +93,22 @@ def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_siz
                 # confusion_matrix[phase].add(preds, labels.data)
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.float() / dataset_sizes[phase]
+            loss_window = "{}_loss".format(phase)
+            acc_window = "{}_acc".format(phase)
+            if line_windows[loss_window] is None:
+                line_windows[loss_window] = vis.line(X=np.array([epoch, epoch]),
+                                                     Y=np.array([epoch_loss.item(), epoch_loss.item()]), env="main",
+                                                     name=loss_window)
+            else:
+                vis.line(X=np.array([epoch]), Y=np.array([epoch_loss.item()]), env="main",
+                         win=line_windows[loss_window], update="append", name=loss_window)
+            if line_windows[acc_window] is None:
+                line_windows[acc_window] = vis.line(X=np.array([epoch, epoch]), Y=np.array([epoch_acc, epoch_acc]),
+                                                    env="main", name=acc_window)
+            else:
+                vis.line(X=np.array([epoch]), Y=np.array([epoch_loss]), env="main",
+                         win=line_windows[acc_window], update="append", name=acc_window)
+
             costs[phase].append(epoch_loss)
             accs[phase].append(epoch_acc)
             print("{} Loss: {:.10f} Acc: {:.10f}".format(
@@ -117,11 +137,15 @@ def train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_siz
 
 if __name__ == "__main__":
     from mura.dataloaders import get_dataloaders, get_study_level_data, get_image_level_data
-    from mura.utils import numpy_float_to_variable_tensor_float, get_count
-    model = get_pretrained_with_imagenet()
-    # if os.environ.get("CUDA", "0") != "0":
-    model.cuda()
+    from mura.utils import numpy_float_to_variable_tensor_float, get_count, STUDY_TYPES
+    from mura import body_part_net
 
+    model = body_part_net.load_pretrained_with_imagenet()
+    # model = get_pretrained_with_imagenet()
+    # if os.environ.get("CUDA", "0") != "0":
+    # model.cuda()
+
+    STUDY_TYPES = ["XR_ELBOW"]
     data_cat = ["train", "valid"]
     data = {study_type: {"train": None, "valid": None} for study_type in STUDY_TYPES}
     W1 = {}
@@ -153,9 +177,12 @@ if __name__ == "__main__":
                 data_flat[dc] = data_flat[dc].append(study_data[dc])
     dataloaders = get_dataloaders(data_flat, batch_size=batch_size)
 
-    criterion = MuraBCELoss(W1, W0, batch_size)
+    # criterion = MuraBCELoss(W1, W0, batch_size)
+    criterion = torch.nn.BCELoss()
     optimizer = Adam(model.parameters(), lr=0.0001)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=1, verbose=True)
     num_epochs = 200
-    model = train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_sizes=sizes, num_epochs=num_epochs)
-    torch.save(model.state_dict(), "mura_train_{}epochs.pt".format(num_epochs))
+    model = train_model(model, criterion, optimizer, dataloaders, scheduler, dataset_sizes=sizes, num_epochs=num_epochs,
+                        label_key="type_oh")
+    torch.save(model.state_dict(), "body_part_train_{}epochs.pt".format(num_epochs))
+    # torch.save(model.state_dict(), "mura_train_{}epochs.pt".format(num_epochs))

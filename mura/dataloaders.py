@@ -4,10 +4,12 @@ import torch
 
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.model_zoo import tqdm
+from mura.utils import body_part_to_one_hot
 from torchvision.datasets.folder import pil_loader
 from torchvision import transforms
 
 categories = ["train", "valid"]
+MURA_BASE = "resources/MURA-v1.1"
 
 
 def get_study_level_data(study_type):
@@ -20,7 +22,7 @@ def get_study_level_data(study_type):
     study_data = {}
     study_label = {"positive": 1, "negative": 0}
     for phase in categories:
-        BASE_DIR = "resources/MURA-v1.1/{}/{}".format(phase, study_type)
+        BASE_DIR = "{}/{}/{}".format(MURA_BASE, phase, study_type)
         patients = list(os.walk(BASE_DIR))[0][1]  # list of patient folder names
         study_data[phase] = pd.DataFrame(columns=["Path", "Count", "Label"])
         i = 0
@@ -43,9 +45,9 @@ def get_image_level_data(study_type):
     image_data = {}
     study_label = {"positive": 1, "negative": 0}
     for phase in categories:
-        BASE_DIR = "resources/MURA-v1.1/{}/{}".format(phase, study_type)
+        BASE_DIR = "{}/{}/{}".format(MURA_BASE, phase, study_type)
         patients = list(os.walk(BASE_DIR))[0][1]  # list of patient folder names
-        image_data[phase] = pd.DataFrame(columns=["Path", "Label", "Study_Type"])
+        image_data[phase] = pd.DataFrame(columns=["Path", "Label", "Study_Type", "Study_Type_OH"])
         i = 0
         for patient in tqdm(patients):  # for each patient folder
             for study in os.listdir(os.path.join(BASE_DIR, patient)):  # for each study in that patient folder
@@ -53,7 +55,7 @@ def get_image_level_data(study_type):
                 study_path = os.path.join(BASE_DIR, patient, study) + "/"  # path to this study
                 for image in os.listdir(study_path):
                     path = os.path.join(study_path, image)
-                    image_data[phase].loc[i] = [path, label, study_type]  # add new row
+                    image_data[phase].loc[i] = [path, label, study_type, body_part_to_one_hot(study_type)]  # add new row
                     i += 1
     return image_data
 
@@ -106,7 +108,7 @@ class MuraImageLevelDataset(Dataset):
         # image = torch.stack([image])
         label = self.df.iloc[idx, 1]
         image_type = self.df.iloc[idx, 2]
-        return {"images": image, "label": label, "type": image_type}
+        return {"images": image, "label": label, "type": image_type, "type_oh": body_part_to_one_hot(image_type)}
 
 
 def collate_fn(batch):
@@ -119,25 +121,28 @@ def collate_fn(batch):
     return result
 
 
-def get_dataloaders(data, batch_size=4):
+def get_dataloaders(data, batch_size=4, validation=False):
     imagenet_training_set_stats = {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
     train_transform = transforms.Compose([
-        transforms.Resize((224, 244)),
+        transforms.Resize((224, 224)),
+        # transforms.Resize((112, 112:)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(30),
         transforms.ToTensor(),
         transforms.Normalize(**imagenet_training_set_stats)
     ])
     valid_transform = transforms.Compose([
-        transforms.Resize((224, 244)),
+        transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(**imagenet_training_set_stats)
     ])
 
+    if validation:
+        train_transform = valid_transform
     image_datasets = {
         "train": MuraImageLevelDataset(data["train"], transform=train_transform),
         "valid": MuraImageLevelDataset(data["valid"], transform=valid_transform)
     }
-    loaders = {key: DataLoader(image_datasets[key], batch_size=batch_size, shuffle=True, num_workers=batch_size) for key in
+    loaders = {key: DataLoader(image_datasets[key], batch_size=batch_size, shuffle=not validation, num_workers=batch_size) for key in
                image_datasets}
     return loaders
